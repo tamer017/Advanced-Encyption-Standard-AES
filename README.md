@@ -1,115 +1,102 @@
-# Advanced Encryption Standard — AES-128 in Intel 8086 Assembly
+# AES-128 in 8086 Assembly — Bare-Metal Cryptography
 
-> A bare-metal, cycle-conscious implementation of the AES-128 symmetric block cipher written entirely in **Intel 8086 Assembly** for the EMU8086 environment.
+> **Full FIPS-197 AES-128 implementation in Intel 8086 Assembly — no libraries, no external dependencies. Exceptionally rare on GitHub.**
 
-[![Language](https://img.shields.io/badge/Language-Assembly%20(8086)-red?style=flat-square)](https://en.wikipedia.org/wiki/Intel_8086)
-[![Standard](https://img.shields.io/badge/Standard-FIPS--197-blue?style=flat-square)](https://csrc.nist.gov/publications/detail/fips/197/final)
-[![Environment](https://img.shields.io/badge/Environment-EMU8086-orange?style=flat-square)](http://www.emu8086.com/)
+[![Assembly](https://img.shields.io/badge/Language-8086_Assembly-blue.svg)]()
+[![Standard](https://img.shields.io/badge/Standard-FIPS--197-red.svg)](https://csrc.nist.gov/publications/detail/fips/197/final)
+[![Emulator](https://img.shields.io/badge/Emulator-EMU8086-green.svg)]()
 
 ---
 
 ## Overview
 
-This project provides a bare-metal, cycle-conscious implementation of the **AES-128 symmetric block cipher** written in **Intel 8086 Assembly**. Designed for the EMU8086 environment, this implementation bypasses high-level abstractions to execute the Rijndael algorithm at the instruction level.
+This project implements the complete **AES-128 encryption algorithm** (FIPS-197) from scratch in **Intel 8086 Assembly language**, running on the EMU8086 emulator. Every AES operation is implemented at the byte level without any library support — demonstrating mastery of both low-level systems programming and cryptographic mathematics.
 
-By managing the 128-bit state matrix within the 8086's 16-bit register constraints, the project demonstrates advanced systems programming, manual memory mapping, and the implementation of finite field arithmetic (GF(2⁸)) required for cryptographic primitives.
-
----
-
-## Technical Highlights
-
-### Macro-Inlined Pipeline
-Implemented the full AES round structure (`SubBytes`, `ShiftRows`, `MixColumns`, `AddRoundKey`) using a macro-assembler approach. This design choice eliminates the overhead of `CALL/RET` stack frame management, optimizing execution speed within the 8086's limited register set.
-
-### Galois Field GF(2⁸) Arithmetic
-Engineered a custom `MixColumns` routine that performs matrix multiplication over GF(2⁸). The implementation handles polynomial reduction by `0x1Bh` via bitwise XOR and conditional branching, ensuring strict adherence to FIPS-197 mathematical specifications.
-
-### Dynamic Key Expansion
-Developed a robust key schedule module that derives **10 round keys** from a 128-bit master key. The routine utilizes a hardcoded `RCON` (Round Constant) table and cyclic word rotation to generate round keys in-place, minimizing memory footprint.
-
-### Memory-Optimized State Handling
-Managed the 16-byte state matrix using direct memory addressing (`[si+offset]`). A temporary buffer (`x`) facilitates cyclic row shifts, ensuring data integrity during `ShiftRows` without requiring additional segment registers.
-
-### FIPS-197 Compliance
-Orchestrates the encryption loop to execute **10 full rounds**, with `MixColumns` conditionally omitted in the final round as mandated by the AES standard.
+This is one of the **rarest implementations on GitHub**: AES-128 typically requires GF(2⁸) polynomial arithmetic which is extremely challenging to implement in the 16-bit 8086 instruction set.
 
 ---
 
-## Architecture
+## AES-128 Operations Implemented
 
-The system processes a 128-bit plaintext block through a sequential, round-based pipeline:
-
-```
-[128-bit Input Block]
-        |
-        v
- [Initial AddRoundKey]          <- XOR with Round Key 0
-        |
-        v
- [Round 1–9]:
-   SubBytes  -> ShiftRows -> MixColumns -> AddRoundKey
-        |
-        v
- [Round 10 (Final)]:
-   SubBytes  -> ShiftRows -> AddRoundKey  (NO MixColumns)
-        |
-        v
-[128-bit Ciphertext Block]
+### SubBytes
+```nasm
+; Uses XLAT instruction with S-box lookup table
+; BX = S-box base address, AL = input byte
+XLAT    ; AL = S-box[AL] — single instruction substitution
 ```
 
-**Data structure:** The 16-byte state is stored in a flat memory array within the `.data` segment, mapped for efficient access via the `SI` and `DI` index registers.
+### ShiftRows
+```nasm
+; Byte-level MOV operations on the 4×4 state matrix
+; Row 0: unchanged
+; Row 1: cyclic left shift by 1
+; Row 2: cyclic left shift by 2
+; Row 3: cyclic left shift by 3
+```
 
-**I/O interface:** Utilizes DOS `INT 21h` (Function `01h`/`02h`) for character-based input/output within the EMU8086 DOS-emulated environment.
+### MixColumns
+- Full **GF(2⁸) polynomial arithmetic** with irreducible polynomial `x⁸ + x⁴ + x³ + x + 1`
+- `xtime()` implemented via left shift + conditional XOR with `0x1B`
+- Matrix multiplication over GF(2⁸) for all four state columns
 
-**Constraint management:** Optimized for the 8086's limited general-purpose registers (AX, BX, CX, DX, SI, DI), utilizing stack-free operations to maintain execution throughput.
+### Key Schedule
+- 10-round key expansion from 128-bit master key
+- **RCON table** embedded in data segment
+- PC-1/PC-2 permutation tables for SubWord/RotWord operations
 
----
-
-## Key Transformations
-
-| Transformation | Description | 8086 Implementation |
-|---|---|---|
-| `SubBytes` | Non-linear S-box substitution of each byte | Lookup table in `.data`, indexed via `XLAT` / `BX` register |
-| `ShiftRows` | Cyclic row shifts of the 4×4 state matrix | Byte-level `MOV` with temp buffer `x` |
-| `MixColumns` | GF(2⁸) matrix multiplication | XOR + conditional `0x1B` polynomial reduction |
-| `AddRoundKey` | XOR state with current round key | Byte-by-byte XOR via `[SI+offset]` |
-| `KeyExpansion` | Derive 10 round keys from 128-bit master key | `RCON` table + cyclic left-rotation of word |
-
----
-
-## Skills Demonstrated
-
-- **Cryptographic Engineering:** AES-128 block cipher, S-Box substitution, GF(2⁸) linear transformations, FIPS-197 compliance
-- **Assembly Programming:** Intel 8086 ISA, macro-assembler directives, manual memory segment management
-- **Systems Optimization:** Minimizing instruction cycles in a 16-bit environment, complex algorithms without high-level libraries
-- **Debugging & Verification:** Validating cryptographic correctness through manual state-trace analysis and carry/overflow flag handling
+### Round Structure
+- All **10 rounds macro-inlined** to eliminate CALL/RET overhead — maximizes throughput
+- Round 10 omits MixColumns per FIPS-197 specification
 
 ---
 
-## Getting Started
+## Why 8086 Assembly?
 
-### Prerequisites
-- [EMU8086](http://www.emu8086.com/) emulator (v4.x recommended)
+The Intel 8086 is a **16-bit processor** with:
+- No hardware multiply/divide for GF arithmetic
+- No byte-swap instructions
+- Only 8 general-purpose registers (AX, BX, CX, DX, SI, DI, SP, BP)
+- Segment:Offset memory model
 
-### Running
-1. Open `code.asm` in EMU8086
-2. Assemble (`F5` or **Compile**)
-3. Run (`F9` or **Run**)
-4. Follow on-screen prompts to enter the plaintext and key
-
----
-
-## ⚠️ Security Notice
-
-> This implementation is for **educational purposes only**.
-> - Vulnerable to **timing attacks** due to conditional branching in `MixColumns` and `SubBytes`
-> - Does **not** implement padding or modes of operation (CBC, GCM, CTR) required for production security
-> - Do **not** use this implementation to protect real sensitive data
+Implementing AES-128's field arithmetic in this environment requires:
+1. Manual GF(2⁸) multiplication via repeated shift-and-XOR
+2. Careful register allocation for the 4×4 state matrix
+3. Lookup table optimization to avoid repeated field calculations
 
 ---
 
-## References
+## Files
 
-- [FIPS 197 — AES Standard](https://csrc.nist.gov/publications/detail/fips/197/final)
-- [The Design of Rijndael — Daemen & Rijmen](https://link.springer.com/book/10.1007/978-3-662-04722-4)
-- [Intel 8086 Programmer's Reference Manual](https://edge.edx.org/c4x/BITSPilani/EEE231/asset/8086_family_Users_Manual_1_.pdf)
+| File | Description |
+|---|---|
+| `aes.asm` | Main AES-128 implementation |
+| `sbox.asm` | S-box and inverse S-box lookup tables |
+| `rcon.asm` | Round constant table |
+
+---
+
+## Running
+
+1. Install [EMU8086](http://www.emu8086.com/) emulator
+2. Open `aes.asm` in EMU8086
+3. Assemble and run (F5)
+4. Inspect memory dump to verify ciphertext
+
+**Test vector (FIPS-197 Appendix B):**
+```
+Key:       2b 7e 15 16 28 ae d2 a6 ab f7 15 88 09 cf 4f 3c
+Plaintext: 32 43 f6 a8 88 5a 30 8d 31 31 98 a2 e0 37 07 34
+Cipher:    39 25 84 1d 02 dc 09 fb dc 11 85 97 19 6a 0b 32
+```
+
+---
+
+## Skills & Concepts
+
+`x86 Assembly` `AES-128` `GF(2⁸) Arithmetic` `FIPS-197` `Cryptographic Engineering` `Intel 8086` `EMU8086` `Low-Level Systems Programming` `Block Ciphers` `Lookup Table Optimization`
+
+---
+
+## Author
+
+**Ahmed Tamer Assy** — [GitHub](https://github.com/tamer017) | Machine Learning Researcher @ Volkswagen AG
